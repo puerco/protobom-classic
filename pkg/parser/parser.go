@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/onesbom/onesbom/pkg/reader"
-	"github.com/onesbom/onesbom/pkg/sbom"
-	"github.com/puerco/protobom/pkg/protobom"
+	onesbom "github.com/onesbom/onesbom/pkg/sbom"
+	"github.com/puerco/protobom/pkg/sbom"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -17,7 +17,7 @@ func New() *Parser {
 type Parser struct{}
 
 // Read parses a file and returns a protobom SBOM object
-func (p *Parser) Read(path string) (*protobom.SBOM, error) {
+func (p *Parser) Read(path string) (*sbom.Document, error) {
 	// Parse the SBOM
 	sbom1 := reader.New()
 
@@ -26,11 +26,11 @@ func (p *Parser) Read(path string) (*protobom.SBOM, error) {
 		return nil, fmt.Errorf("parsing document: %w", err)
 	}
 
-	bom := &protobom.SBOM{
-		Id:       "",
-		Metadata: []*protobom.Property{},
-		Nodes:    []*protobom.Node{},
-		Graph:    []*protobom.Edge{},
+	bom := &sbom.Document{
+		Metadata:     &sbom.Metadata{},
+		RootElements: []string{},
+		Nodes:        []*sbom.Node{},
+		Edges:        []*sbom.Edge{},
 	}
 
 	for _, f := range doc.Nodes.Files() {
@@ -50,136 +50,103 @@ func (p *Parser) Read(path string) (*protobom.SBOM, error) {
 	}
 
 	for _, r := range doc.Relationships {
-		pbRel, err := p.protoRelationship(r)
+		pbRel, err := p.protoEdge(r)
 		if err != nil {
 			return nil, fmt.Errorf("converting relationship to protobuf: %w", err)
 		}
-		bom.Graph = append(bom.Graph, pbRel)
+		bom.Edges = append(bom.Edges, pbRel)
 	}
 
 	return bom, nil
 }
 
 // protoPackage converts a onesbom package into a protobom Node
-func (p *Parser) protoPackage(pkg *sbom.Package) (*protobom.Node, error) {
+func (p *Parser) protoPackage(pkg *onesbom.Package) (*sbom.Node, error) {
 	if pkg == nil {
 		return nil, errors.New("package is nil")
 	}
-	pbPackage := &protobom.Node{
-		Id:   pkg.ID(),
-		Type: 0,
-		Metadata: []*protobom.Property{
-			{Name: "name", Value: pkg.Name},
-			{Name: "url", Value: pkg.URL},
-			{Name: "comment", Value: pkg.Comment},
-			{Name: "licenseComments", Value: pkg.LicenseComments},
-			{Name: "copyright", Value: pkg.Copyright},
-			{Name: "licenseConcluded", Value: string(pkg.LicenseConcluded)},
-			{Name: "sourceInfo", Value: pkg.SourceInfo},
-			{Name: "primaryPurpose", Value: pkg.PrimaryPurpose},
-			{Name: "version", Value: pkg.Version},
-			{Name: "fileName", Value: pkg.FileName},
-			{Name: "summary", Value: pkg.Summary},
-			{Name: "description", Value: pkg.Description},
-			{Name: "downloadLocation", Value: pkg.DownloadLocation},
-			{Name: "releaseDate", Time: timestamppb.New(*pkg.ReleaseDate)},
-			{Name: "builtDate", Time: timestamppb.New(*pkg.BuiltDate)},
-			{Name: "validUntilDate", Time: timestamppb.New(*pkg.ValidUntilDate)},
-		},
+	pbPackage := &sbom.Node{
+		Id:               pkg.ID(),
+		Type:             0,
+		Name:             pkg.Name,
+		Version:          pkg.Version,
+		FileName:         pkg.FileName,
+		UrlHome:          pkg.URL,
+		UrlDownload:      pkg.DownloadLocation,
+		Licenses:         []string{},
+		LicenseConcluded: string(pkg.LicenseConcluded),
+		LicenseComments:  pkg.LicenseComments,
+		Copyright:        pkg.Copyright,
+		Hashes:           pkg.Hashes,
+		SourceInfo:       pkg.SourceInfo,
+		PrimaryPurpose:   pkg.PrimaryPurpose,
+		Comment:          pkg.Comment,
+		Summary:          pkg.Summary,
+		Description:      pkg.Description,
+		//Suppliers:          []*sbom.Person{},
+		//Originators:        []*sbom.Person{},
+		ExternalReferences: []*sbom.ExternalReference{},
+		Identifiers:        []*sbom.Identifier{},
+		FileTypes:          []string{},
 	}
 
-	attribProperty := &protobom.Property{Name: "attribution", Properties: []*protobom.Property{}}
-	for i, a := range *pkg.Attribution {
-		attribProperty.Properties = append(attribProperty.Properties, &protobom.Property{
-			Name:  fmt.Sprintf("%d", i),
-			Value: a,
-		})
+	if pkg.ReleaseDate != nil {
+		pbPackage.ReleaseDate = timestamppb.New(*pkg.ReleaseDate)
 	}
-	pbPackage.Metadata = append(pbPackage.Metadata, attribProperty)
-
-	hashesProperty := &protobom.Property{Name: "hashes", Properties: []*protobom.Property{}}
-	for algo, h := range pkg.Hashes {
-		hashesProperty.Properties = append(hashesProperty.Properties, &protobom.Property{
-			Name:  algo,
-			Value: h,
-		})
+	if pkg.BuiltDate != nil {
+		pbPackage.BuildDate = timestamppb.New(*pkg.BuiltDate)
 	}
-	pbPackage.Metadata = append(pbPackage.Metadata, hashesProperty)
 
-	identifierProperty := &protobom.Property{Name: "identifiers", Properties: []*protobom.Property{}}
+	if pkg.ValidUntilDate != nil {
+		pbPackage.ValidUntilDate = timestamppb.New(*pkg.ValidUntilDate)
+	}
+
+	if pkg.Attribution != nil {
+		pbPackage.Attribution = *pkg.Attribution
+	}
+
 	for _, id := range pkg.Identifiers {
-		identifierProperty.Properties = append(identifierProperty.Properties, &protobom.Property{
-			Name:  id.Type,
+		pbPackage.Identifiers = append(pbPackage.Identifiers, &sbom.Identifier{
+			Type:  id.Type,
 			Value: id.Value,
 		})
 	}
-	pbPackage.Metadata = append(pbPackage.Metadata, identifierProperty)
-
 	return pbPackage, nil
 }
 
 // protoFile takes a onesbom file and converts it to a protobom Node
-func (p *Parser) protoFile(f *sbom.File) (*protobom.Node, error) {
+func (p *Parser) protoFile(f *onesbom.File) (*sbom.Node, error) {
 	if f == nil {
 		return nil, errors.New("file is nil")
 	}
-	pbFile := &protobom.Node{
-		Id:   f.ID(),
-		Type: 1,
-		Metadata: []*protobom.Property{
-			{Name: "name", Value: f.Name},
-			{Name: "url", Value: f.URL},
-			{Name: "comment", Value: f.Comment},
-			{Name: "licenseComments", Value: f.LicenseComments},
-			{Name: "copyright", Value: f.Copyright},
-			{Name: "licenseConcluded", Value: string(f.LicenseConcluded)},
-		},
+	pbFile := &sbom.Node{
+		Id:              f.ID(),
+		Type:            1, // Always file
+		Name:            f.Name,
+		Licenses:        []string{},
+		LicenseComments: f.LicenseComments,
+		Copyright:       f.Copyright,
+		Hashes:          f.Hashes,
+		Comment:         f.Comment,
+		FileTypes:       f.Types,
 	}
 
-	hashesProperty := &protobom.Property{Name: "hashes", Properties: []*protobom.Property{}}
-	for algo, h := range f.Hashes {
-		hashesProperty.Properties = append(hashesProperty.Properties, &protobom.Property{
-			Name:  algo,
-			Value: h,
-		})
-	}
-	pbFile.Metadata = append(pbFile.Metadata, hashesProperty)
-
-	licenseProperty := &protobom.Property{
-		Name:       "licenses",
-		Properties: []*protobom.Property{},
-	}
-
-	for i, l := range f.Licenses {
-		licenseProperty.Properties = append(licenseProperty.Properties, &protobom.Property{
-			Name:  fmt.Sprintf("%d", i),
-			Value: string(l),
-		})
-	}
-
-	typesProperty := &protobom.Property{
-		Name:       "types",
-		Properties: []*protobom.Property{},
-	}
-	for i, t := range f.Types {
-		typesProperty.Properties = append(typesProperty.Properties, &protobom.Property{
-			Name:  fmt.Sprintf("%d", i),
-			Value: t,
-		})
+	for _, l := range f.Licenses {
+		pbFile.Licenses = append(pbFile.Licenses, string(l))
 	}
 
 	return pbFile, nil
 }
 
-// protoRelationship converts a onebom relationship to a protbom Edge
-func (p *Parser) protoRelationship(r sbom.Relationship) (*protobom.Edge, error) {
+// protoEdge converts a onebom relationship to a protbom Edge
+func (p *Parser) protoEdge(r onesbom.Relationship) (*sbom.Edge, error) {
 	if r.Source.ID() == "" {
 		return nil, errors.New("source element does not have an ID")
 	}
 	if len(*r.Target) == 0 {
 		return nil, errors.New("relationship has no target elements")
 	}
-	edge := &protobom.Edge{
+	edge := &sbom.Edge{
 		Type: string(r.Type),
 		From: r.Source.ID(),
 		To:   []string{},
