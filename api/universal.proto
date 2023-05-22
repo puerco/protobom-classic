@@ -2,7 +2,7 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "protobom/";
+option go_package = "universal/";
 package puerco.protobom;
 
 // Graph is a minimal SBOM graph that can capture any SBOM 
