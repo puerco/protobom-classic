@@ -206,7 +206,6 @@ func nodeToCDX14Component(n *sbom.Node) *cdx14.Component {
 	if n.Licenses != nil && len(n.Licenses) > 0 {
 		c.Licenses = []cdx14.License{}
 		for _, l := range n.Licenses {
-			logrus.Info("adding license %s", l)
 			c.Licenses = append(c.Licenses, cdx14.License{
 				License: struct {
 					ID string "json:\"id\"" // TODO optimize
