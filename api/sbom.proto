@@ -150,4 +150,5 @@ message Identifier {
 
 message NodeList {
     repeated Node nodes = 1;
+    repeated Edge edges = 2;
 }
